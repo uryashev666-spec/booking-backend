@@ -92,7 +92,10 @@ def get_user_records(user_id: str):
 
 
 def week_limit(user_id: str, target_date: str) -> int:
-    """Сколько у пользователя занятий за 7 дней, включая target_date (как в боте)."""
+    """
+    Сколько у пользователя занятий за 7 дней, включая target_date.
+    Логика как в боте: target_date и 6 пред. дней.
+    """
     new_dt = datetime.strptime(target_date, "%d.%m.%Y")
     week_dates = {
         (new_dt + timedelta(days=i)).strftime("%d.%m.%Y")
