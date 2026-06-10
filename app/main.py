@@ -1,7 +1,10 @@
 import os
 from datetime import datetime
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from .models import BookingRequest
 from .schedule_logic import get_times, get_workdays, safe_datetime
@@ -26,6 +29,13 @@ MAX_PER_DAY = 1    # максимум занятий в день
 # Секрет для админ‑эндпоинтов (добавь ADMIN_SECRET в ENV на Render)
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "change-me")
 
+# Пути для статики
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
+
+# Раздача статики
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
 
 def check_admin(token: str = Query(..., alias="admin_token")):
     if token != ADMIN_SECRET:
@@ -36,6 +46,12 @@ def check_admin(token: str = Query(..., alias="admin_token")):
 def on_startup():
     # Создаём таблицы при старте (если их ещё нет)
     init_db()
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    index_path = STATIC_DIR / "index.html"
+    return index_path.read_text(encoding="utf-8")
 
 
 @app.get("/health")
