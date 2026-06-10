@@ -1,1 +1,237 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <title>Запись на вождение</title>
+    <style>
+        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px; background: #111; color: #f5f5f5; }
+        h1 { font-size: 22px; margin-bottom: 12px; }
+        .block { margin-bottom: 16px; padding: 12px; border-radius: 8px; background: #1e1e1e; }
+        button { cursor: pointer; padding: 8px 12px; border-radius: 6px; border: none; background: #2563eb; color: white; margin: 4px 4px 4px 0; }
+        button[disabled] { background: #444; cursor: default; }
+        label { display: block; margin-top: 8px; font-size: 14px; }
+        input, textarea { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #111; color: #f5f5f5; box-sizing: border-box; }
+        textarea { resize: vertical; min-height: 60px; }
+        .slots { margin-top: 8px; }
+        .slot-btn { min-width: 80px; }
+        .slot-booked { background: #b91c1c; }
+        .slot-free { background: #16a34a; }
+        .status { margin-top: 8px; font-size: 14px; }
+        .status.error { color: #f97373; }
+        .status.ok { color: #4ade80; }
+        small { color: #aaa; }
+    </style>
+</head>
+<body>
+    <h1>Запись на вождение</h1>
 
+    <div class="block">
+        <div><strong>Шаг 1.</strong> Выберите дату занятия</div>
+        <div id="dates"></div>
+    </div>
+
+    <div class="block">
+        <div><strong>Шаг 2.</strong> Выберите время</div>
+        <div id="times" class="slots"></div>
+        <div id="slotInfo"></div>
+    </div>
+
+    <div class="block">
+        <div><strong>Шаг 3.</strong> Заполните данные</div>
+        <label>
+            Ваше имя и фамилия
+            <input id="fio" type="text" placeholder="Иванов Иван" />
+        </label>
+        <label>
+            Адрес (откуда вас забирать)
+            <textarea id="address" placeholder="Город, улица, дом..."></textarea>
+        </label>
+        <label>
+            Дополнительная информация (необязательно)
+            <textarea id="meta" placeholder="Например: есть права / нет прав, пожелания по маршруту и т.п."></textarea>
+        </label>
+        <label>
+            Ваш ID (любой уникальный идентификатор, можно номер телефона)
+            <input id="userId" type="text" placeholder="+7..." />
+        </label>
+        <button id="bookBtn">Записаться</button>
+        <div id="status" class="status"></div>
+        <small>Нажимая «Записаться», вы подтверждаете, что согласны с правилами записи.</small>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+
+        let selectedDate = null;
+        let selectedTime = null;
+
+        const datesEl = document.getElementById('dates');
+        const timesEl = document.getElementById('times');
+        const slotInfoEl = document.getElementById('slotInfo');
+        const bookBtn = document.getElementById('bookBtn');
+        const statusEl = document.getElementById('status');
+
+        const fioEl = document.getElementById('fio');
+        const addressEl = document.getElementById('address');
+        const metaEl = document.getElementById('meta');
+        const userIdEl = document.getElementById('userId');
+
+        function setStatus(msg, type = 'ok') {
+            statusEl.textContent = msg;
+            statusEl.className = 'status ' + type;
+        }
+
+        async function apiGet(path) {
+            const resp = await fetch(API_BASE + path);
+            if (!resp.ok) {
+                throw new Error('Ошибка ' + resp.status);
+            }
+            return resp.json();
+        }
+
+        async function apiPost(path, body) {
+            const resp = await fetch(API_BASE + path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                const detail = data.detail || 'Ошибка ' + resp.status;
+                throw new Error(detail);
+            }
+            return data;
+        }
+
+        function renderDates(dates) {
+            datesEl.innerHTML = '';
+            dates.forEach((d) => {
+                const btn = document.createElement('button');
+                btn.textContent = d;
+                btn.onclick = () => {
+                    selectedDate = d;
+                    selectedTime = null;
+                    renderSelectedSlot();
+                    loadSlots();
+                };
+                if (d === selectedDate) {
+                    btn.style.border = '2px solid #facc15';
+                }
+                datesEl.appendChild(btn);
+            });
+        }
+
+        function renderSelectedSlot() {
+            if (selectedDate && selectedTime) {
+                slotInfoEl.textContent = `Вы выбрали: ${selectedDate} ${selectedTime}`;
+            } else if (selectedDate) {
+                slotInfoEl.textContent = `Выбрана дата: ${selectedDate}. Выберите время.`;
+            } else {
+                slotInfoEl.textContent = '';
+            }
+        }
+
+        function renderSlots(times, schedule) {
+            timesEl.innerHTML = '';
+            const taken = new Set(
+                schedule
+                    .filter((r) => r.date === selectedDate && r.status !== 'отменено')
+                    .map((r) => r.time)
+            );
+
+            times.forEach((t) => {
+                const btn = document.createElement('button');
+                btn.textContent = t;
+                btn.classList.add('slot-btn');
+
+                if (taken.has(t)) {
+                    btn.disabled = true;
+                    btn.classList.add('slot-booked');
+                } else {
+                    btn.classList.add('slot-free');
+                    btn.onclick = () => {
+                        selectedTime = t;
+                        renderSelectedSlot();
+                    };
+                }
+
+                timesEl.appendChild(btn);
+            });
+        }
+
+        async function loadDates() {
+            try {
+                const dates = await apiGet('/workdays');
+                if (!dates.length) {
+                    datesEl.textContent = 'Нет доступных дат';
+                    return;
+                }
+                selectedDate = selectedDate || dates[0];
+                renderDates(dates);
+                await loadSlots();
+            } catch (e) {
+                datesEl.textContent = 'Ошибка загрузки дат';
+                console.error(e);
+            }
+        }
+
+        async function loadSlots() {
+            if (!selectedDate) return;
+            try {
+                const [times, schedule] = await Promise.all([
+                    apiGet('/times'),
+                    apiGet('/schedule'),
+                ]);
+                renderSlots(times, schedule);
+            } catch (e) {
+                timesEl.textContent = 'Ошибка загрузки слотов';
+                console.error(e);
+            }
+        }
+
+        async function handleBook() {
+            setStatus('', 'ok');
+
+            if (!selectedDate || !selectedTime) {
+                setStatus('Сначала выберите дату и время', 'error');
+                return;
+            }
+
+            const fio = fioEl.value.trim();
+            const address = addressEl.value.trim();
+            const meta = metaEl.value.trim();
+            const userId = userIdEl.value.trim();
+
+            if (!fio || !address || !userId) {
+                setStatus('Заполните ФИО, адрес и ID', 'error');
+                return;
+            }
+
+            bookBtn.disabled = true;
+            bookBtn.textContent = 'Отправка...';
+
+            try {
+                await apiPost('/book', {
+                    date: selectedDate,
+                    time: selectedTime,
+                    user_id: userId,
+                    fio: fio,
+                    address: address,
+                    meta: meta || null,
+                });
+                setStatus('Запись успешно создана!', 'ok');
+                await loadSlots();
+            } catch (e) {
+                setStatus(String(e.message || e), 'error');
+            } finally {
+                bookBtn.disabled = false;
+                bookBtn.textContent = 'Записаться';
+            }
+        }
+
+        bookBtn.addEventListener('click', handleBook);
+
+        loadDates();
+    </script>
+</body>
+</html>
